@@ -589,36 +589,15 @@ def get_lr(it):
 
 
 
-# ================================================ Flops Calculator ===========================================================
+# ================================================ MFU Calculator ==============================================================
+# Simple "6N" approximation (Kaplan et al. / OpenAI scaling laws):
+# Each token requires ~6N FLOPs for a full forward + backward pass (1x fwd + 2x bwd).
+# MFU = (actual FLOPs) / (peak FLOPs of the GPU)
 
-def deepmind_flops_per_sequence(n_layers, n_heads, d_model, n_ctx, n_vocab, ff_ratio=4):
-    """DeepMind method for forwad pass FLOPs counting of decoder-only Transformer
-    """
-    d_attn = d_model // n_heads
-    d_ff = d_model * ff_ratio
- 
-    embeddings = 2 * n_ctx * n_vocab * d_model
- 
-    attn_qkv = 2 * n_ctx * 3 * d_model * (d_attn * n_heads)
-    attn_logits = 2 * n_ctx * n_ctx * (d_attn * n_heads)
-    attn_softmax = 3 * n_heads * n_ctx * n_ctx
-    attn_reduce = 2 * n_ctx * n_ctx * (d_attn * n_heads)
-    attn_project = 2 * n_ctx * (d_attn * n_heads) * d_model
-    total_attn = attn_qkv + attn_logits + attn_softmax + attn_reduce + attn_project
- 
-    ff = 2 * n_ctx * (d_model * d_ff + d_model * d_ff)
- 
-    logits = 2 * n_ctx * d_model * n_vocab
- 
-    return embeddings + n_layers * (total_attn + ff) + logits
-
-
-# FLOPs calculation (once, before training loop)
-flops_per_seq_fwd = deepmind_flops_per_sequence(
-    n_layers=GPTConfig.n_layer, n_heads=GPTConfig.n_head,
-    d_model=GPTConfig.n_embd, n_ctx=GPTConfig.block_size,
-    n_vocab=GPTConfig.vocab_size, ff_ratio=4
-)
+num_params = sum(p.numel() for p in raw_model.parameters())
+flops_per_token = 6 * num_params  # forward + backward FLOPs per token
+if master_process:
+    print(f"model parameters: {num_params:,} | flops per token (6N): {flops_per_token:,}")
 
 
 # ======================================= Configure the optimizer and a logger ===============================================
@@ -750,7 +729,7 @@ for step in range(max_steps):
     dt = (t1 - t0) # times difference in seconds
     tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
     tokens_per_sec = tokens_processed / dt
-    mfu = (flops_per_seq_fwd * B * grad_accum_steps * 3) / (dt * gpu_peak_flops)
+    mfu = (flops_per_token * tokens_processed) / (dt * gpu_peak_flops * ddp_world_size)
 
     # Write/show the statistics
     if master_process:
