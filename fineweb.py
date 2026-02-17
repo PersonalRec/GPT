@@ -5,7 +5,7 @@ Downloads and tokenizes the data and saves data shards to disk.
 Run simply as:
 $ python fineweb.py
 $ python fineweb.py --test  # tiny dataset for testing (e.g. TensorBoard)
-Will save shards to the local directory "edu_fineweb10B".
+Will save shards to the local directory "edu_fineweb100B".
 """
 
 import argparse
@@ -40,10 +40,10 @@ if args.test:
     local_dir = "edu_fineweb10B"
     print("TEST MODE: downloading tiny dataset subset")
 else:
-    local_dir = "edu_fineweb10B"
-    shard_size = int(1e8) # 100M tokens per shard, total of 100 shards
+    local_dir = "edu_fineweb100B"
+    shard_size = int(1e8) # 100M tokens per shard, total of ~1000 shards
 
-remote_name = "sample-10BT"
+remote_name = "sample-100BT"
 
 # create the cache the local directory if it doesn't exist yet
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), local_dir)
@@ -100,7 +100,7 @@ if __name__ == '__main__':
         print("No HF_TOKEN found. Downloads may be slower. Set HF_TOKEN env variable for faster downloads.")
 
     # download the dataset
-    fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train", token=hf_token, num_proc=4) # Parallel processing after download
+    fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train", token=hf_token, num_proc=8) # Parallel processing after download
 
     # tokenize all documents and write output shards, each of shard_size tokens (last shard has remainder)
     nprocs = max(1, os.cpu_count()) # use all CPU cores

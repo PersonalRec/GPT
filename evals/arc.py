@@ -25,7 +25,6 @@ import os
 import json
 import requests
 import tiktoken
-from tqdm import tqdm
 import torch
 from torch.nn import functional as F
 
@@ -36,38 +35,56 @@ DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "arc")
 
 enc = tiktoken.get_encoding("gpt2")
 
-# ARC-Challenge direct download URLs (from the official allenai S3 bucket)
-ARC_URLS = {
-    "train": "https://ai2-public-datasets.s3.amazonaws.com/arc-da/ARC-V1-Feb2018-2/ARC-Challenge/ARC-Challenge-Train.jsonl",
-    "val": "https://ai2-public-datasets.s3.amazonaws.com/arc-da/ARC-V1-Feb2018-2/ARC-Challenge/ARC-Challenge-Dev.jsonl",
-    "test": "https://ai2-public-datasets.s3.amazonaws.com/arc-da/ARC-V1-Feb2018-2/ARC-Challenge/ARC-Challenge-Test.jsonl",
-}
-
-
-def download_file(url: str, fname: str, chunk_size=1024):
-    """Helper function to download a file from a given url"""
-    resp = requests.get(url, stream=True)
-    total = int(resp.headers.get("content-length", 0))
-    with open(fname, "wb") as file, tqdm(
-        desc=fname,
-        total=total,
-        unit="iB",
-        unit_scale=True,
-        unit_divisor=1024,
-    ) as bar:
-        for data in resp.iter_content(chunk_size=chunk_size):
-            size = file.write(data)
-            bar.update(size)
+# HuggingFace datasets-server API for ARC-Challenge
+HF_API_URL = "https://datasets-server.huggingface.co/rows"
+HF_DATASET = "allenai/ai2_arc"
+HF_CONFIG = "ARC-Challenge"
+HF_SPLIT_MAP = {"train": "train", "val": "validation", "test": "test"}
 
 
 def download(split):
-    """Downloads ARC-Challenge data for a given split."""
+    """Downloads ARC-Challenge data for a given split from HuggingFace."""
     os.makedirs(DATA_CACHE_DIR, exist_ok=True)
-    data_url = ARC_URLS[split]
     data_filename = os.path.join(DATA_CACHE_DIR, f"ARC-Challenge-{split}.jsonl")
     if not os.path.exists(data_filename):
-        print(f"Downloading {data_url} to {data_filename}...")
-        download_file(data_url, data_filename)
+        hf_split = HF_SPLIT_MAP[split]
+        print(f"Downloading ARC-Challenge {hf_split} split from HuggingFace...")
+        rows = []
+        offset = 0
+        limit = 100
+        while True:
+            resp = requests.get(HF_API_URL, params={
+                "dataset": HF_DATASET,
+                "config": HF_CONFIG,
+                "split": hf_split,
+                "offset": offset,
+                "length": limit,
+            })
+            resp.raise_for_status()
+            data = resp.json()
+            batch = data.get("rows", [])
+            if not batch:
+                break
+            rows.extend(batch)
+            if len(batch) < limit:
+                break
+            offset += limit
+        # Convert HuggingFace format to the ARC JSONL format expected by render_example:
+        # HF has flat {"question": str, "choices": {...}} while the code expects
+        # {"question": {"stem": str, "choices": {...}}}
+        with open(data_filename, "w") as f:
+            for item in rows:
+                row = item["row"]
+                example = {
+                    "id": row["id"],
+                    "question": {
+                        "stem": row["question"],
+                        "choices": row["choices"],
+                    },
+                    "answerKey": row["answerKey"],
+                }
+                f.write(json.dumps(example) + "\n")
+        print(f"Saved {len(rows)} examples to {data_filename}")
     return data_filename
 
 

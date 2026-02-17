@@ -22,7 +22,6 @@ class GPTConfig():
     use_rope: bool = True      # use RoPE embedding for training
     rope_base: float = 10000.0
     mlp_type: str = "swiglu"   # MLP activation type: "gelu" or "swiglu"
-    dropout: float = 0.1 # Set some dropout for multi-epoch training
 
 
 # ========================================= Training parameters ==================================================================
@@ -34,18 +33,18 @@ checkpointer_steps = 10000
 
 # Evaluation benchmarks to run (set to False to skip)
 run_hellaswag = True
-run_mmlu = True
-run_arc = True
+run_mmlu = False
+run_arc = False
 
 # Gradient accumulation parameters
 total_batch_size = 524288 # 2**19, ~0.5M in number of tokens
 B = 32 # ~16 GB of memory, ideally maximize to B = 32 (for ~28 GB in 32GB RTX 5090) or B = 64 (in more modern architectures e.g. A100 40/80GB)
 T = 1024 # sequence of length (context window size) for GPT-2, 2048 for GPT-3
 
-max_lr = 6e-4 * 3
+max_lr = 6e-4 * 4
 min_lr = max_lr * 0.1
 warmup_steps = 715 // 2 # 375e6 / 2**19 (warmup during 375M tokens) / (0.5M tokens in a batch) = 715 steps
-max_steps = 19073 * 3 # 10 trillion tokens / 2**19 (0.5M tokens in a batch) = 19,073 steps per epoch.
+max_steps = 20000 * 10 # 10 billion tokens, 10e10 / 0.5e6 (0.5M tokens in a batch) = 20,000 steps per epoch. For the new 100BT dataset we multiply steps by 10
 
 weight_decay = 0.1
 eval_steps = 500 # evaluate the model every 250 steps
@@ -146,8 +145,6 @@ class CausalSelfAttention(nn.Module):
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
-        self.dropout = config.dropout
-        self.resid_dropout = nn.Dropout(p=config.dropout)
 
         # # Creates the causal mask (lower triangular matrix). Saved with model but NOT a trainable parameter.
         # # Not used with flash-attention!
@@ -199,13 +196,12 @@ class CausalSelfAttention(nn.Module):
             q, k = self.rotary_emb(q, k, seq_len=T)
 
         # Flash-attention implementation
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0.0) # added dropout for the training phase
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
 
         # Reassembles multi-head outputs, concatenates side-by-side
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         # output projection
         y = self.c_proj(y)
-        y = self.resid_dropout(y)
 
         return y
  
@@ -215,7 +211,6 @@ class MLP(nn.Module):
 
         mlp_type = getattr(config, "mlp_type", "gelu")
         self.mlp_type = mlp_type
-        self.resid_dropout = nn.Dropout(p=config.dropout)
 
         # SwiGLU MLP
         if mlp_type == "swiglu":
@@ -248,8 +243,7 @@ class MLP(nn.Module):
             x = self.c_fc(x)
             x = self.gelu(x)
             x = self.c_proj(x)
-        
-        x = self.resid_dropout(x)
+
 
         return x
 
@@ -392,7 +386,7 @@ class GPT(nn.Module):
 # Improved DataLoaderLite with proper shuffling for multi-epoch training
 
 class DataLoaderLite:
-    def __init__(self, B, T, process_rank, num_processes, split, data_root='edu_fineweb10B', seed=1337):
+    def __init__(self, B, T, process_rank, num_processes, split, data_root='edu_fineweb100B', seed=1337):
         self.B = B
         self.T = T
         self.process_rank = process_rank
@@ -559,7 +553,7 @@ if master_process:
 
 # ================================ Instantiate the data loader ==============================================================
 
-data_root = "edu_fineweb10B"  # Directory containing the tokenized shards
+data_root = "edu_fineweb100B"  # Directory containing the tokenized shards
 train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, 
                                split='train', data_root=data_root, seed=1337)
 val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, 
