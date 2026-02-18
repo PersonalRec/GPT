@@ -3,9 +3,10 @@ FineWeb-Edu dataset (for srs pretraining)
 https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu
 Downloads and tokenizes the data and saves data shards to disk.
 Run simply as:
-$ python fineweb.py
-$ python fineweb.py --test  # tiny dataset for testing (e.g. TensorBoard)
-Will save shards to the local directory "edu_fineweb100B".
+$ python fineweb.py                 # downloads 10BT (default)
+$ python fineweb.py --size 100BT    # downloads 100BT
+$ python fineweb.py --test           # tiny dataset for testing (e.g. TensorBoard)
+Will save shards to the "edu_fineweb" directory.
 """
 
 import argparse
@@ -34,16 +35,19 @@ except ImportError:
 # ------------------------------------------
 parser = argparse.ArgumentParser()
 parser.add_argument("--test", action="store_true", help="Download a tiny dataset subset for quick testing")
+parser.add_argument("--size", type=str, default="10BT", choices=["10BT", "100BT"], help="Dataset size to download: 10BT or 100BT (default: 10BT)")
 args, _ = parser.parse_known_args()
 
+shard_size = int(1e8) # 100M tokens per shard
+
+local_dir = "edu_fineweb"
+
 if args.test:
-    local_dir = "edu_fineweb10B"
+    remote_name = None
     print("TEST MODE: downloading tiny dataset subset")
 else:
-    local_dir = "edu_fineweb100B"
-    shard_size = int(1e8) # 100M tokens per shard, total of ~1000 shards
-
-remote_name = "sample-100BT"
+    remote_name = f"sample-{args.size}"
+    print(f"Downloading FineWeb-Edu {args.size} dataset")
 
 # create the cache the local directory if it doesn't exist yet
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), local_dir)

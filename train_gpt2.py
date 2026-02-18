@@ -386,7 +386,7 @@ class GPT(nn.Module):
 # Improved DataLoaderLite with proper shuffling for multi-epoch training
 
 class DataLoaderLite:
-    def __init__(self, B, T, process_rank, num_processes, split, data_root='edu_fineweb100B', seed=1337):
+    def __init__(self, B, T, process_rank, num_processes, split, data_root='edu_fineweb', seed=1337):
         self.B = B
         self.T = T
         self.process_rank = process_rank
@@ -553,7 +553,7 @@ if master_process:
 
 # ================================ Instantiate the data loader ==============================================================
 
-data_root = "edu_fineweb100B"  # Directory containing the tokenized shards
+data_root = "edu_fineweb"  # Directory containing the tokenized shards
 train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, 
                                split='train', data_root=data_root, seed=1337)
 val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, 
