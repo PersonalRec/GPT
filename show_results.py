@@ -14,6 +14,7 @@ import csv
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 sz = "124M"
 
@@ -107,7 +108,7 @@ def load_log(log_path):
 
 # Define log files to load
 log_files = {
-    "gpt-2 (baseline)": "logs/log124M_40B_230126/01/26/log.txt",
+    "gpt-2 (baseline)": "logs/log124M_40B_230126/log.txt",
     "gpt-improved (RoPE + SwiGLU)": "logs/log124M_050226/log.txt"
 }
 
@@ -152,6 +153,9 @@ if sz in ["124M"]:
 plt.xlabel("Steps", fontsize=12)
 plt.ylabel("Loss", fontsize=12)
 plt.yscale('log')
+ax1 = plt.gca()
+ax1.yaxis.set_major_locator(ticker.FixedLocator(np.arange(2.4, 4.01, 0.1)))
+ax1.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.1f'))
 plt.grid(True, which='both', axis='both', alpha=0.3, linestyle='-')
 plt.ylim(top=4.0)
 plt.legend(loc='upper right', fontsize=10)
@@ -183,6 +187,9 @@ if sz in ["124M"]:
                 label=f"OpenAI GPT-3 ({sz})", linewidth=2)
 plt.xlabel("Steps", fontsize=12)
 plt.ylabel("Accuracy", fontsize=12)
+ax2 = plt.gca()
+ax2.yaxis.set_major_locator(ticker.MultipleLocator(0.01))
+ax2.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.2f'))
 plt.legend(loc='lower right', fontsize=10)
 plt.title("HellaSwag Eval", fontsize=14)
 plt.grid(True, alpha=0.3)
