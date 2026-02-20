@@ -1,3 +1,5 @@
+#GPT2 128M Long version
+
 from dataclasses import dataclass
 import torch, math
 import torch.nn as nn
@@ -14,9 +16,9 @@ import numpy as np
 class GPTConfig():
     block_size: int = 1024 # maximum sequence length (context length)
     vocab_size: int = 50304 # number of tokens: 50,000 BPE merges + 256 tokens + 1 <|endoftext|> token = 50257 which is inefficient in terms of cuda processing, new vocab size 50304 could be easily divided by a lot of numbers
-    n_layer: int = 12 # number of layers (transformer blocks: each block has attention + MLP + RMSNorms)
-    n_head: int = 12 # number of heads per transformer blocks. Each head sees 768 ÷ 12 = 64 dimensions. Different heads can learn different attention patterns.
-    n_embd: int = 768 # embedding dimension
+    n_layer: int = 30 # number of layers (transformer blocks: each block has attention + MLP + RMSNorms)
+    n_head: int = 8 # number of heads per transformer blocks. Each head sees 512 ÷ 8 = 64 dimensions. Different heads can learn different attention patterns.
+    n_embd: int = 512 # embedding dimension
 
     # additional options
     use_rope: bool = True      # use RoPE embedding for training
@@ -38,13 +40,13 @@ run_arc = False
 
 # Gradient accumulation parameters
 total_batch_size = 524288 # 2**19, ~0.5M in number of tokens
-B = 32 # ~16 GB of memory, ideally maximize to B = 32 (for ~28 GB in 32GB RTX 5090) or B = 64 (in more modern architectures e.g. A100 40/80GB)
+B = 16 # Fits on RTX 5090 with 32 GB VRAM
 T = 1024 # sequence of length (context window size) for GPT-2, 2048 for GPT-3
 
 max_lr = 6e-4 * 4
 min_lr = max_lr * 0.1
 warmup_steps = 715 // 2 # 375e6 / 2**19 (warmup during 375M tokens) / (0.5M tokens in a batch) = 715 steps
-max_steps = 20000 * 10 # 10 billion tokens, 10e10 / 0.5e6 (0.5M tokens in a batch) = 20,000 steps per epoch. For the new 100BT dataset we multiply steps by 10
+max_steps = 20000 * 2 # 10 billion tokens, 10e10 / 0.5e6 (0.5M tokens in a batch) = 20,000 steps per epoch. For the new 100BT dataset we multiply steps by 10
 
 weight_decay = 0.1
 eval_steps = 500 # evaluate the model every 250 steps
@@ -243,7 +245,6 @@ class MLP(nn.Module):
             x = self.c_fc(x)
             x = self.gelu(x)
             x = self.c_proj(x)
-
 
         return x
 

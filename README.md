@@ -1,6 +1,8 @@
 # GPT-2 124M Reproduction
 
-This project is a near complete reproduction of the original GPT-2 124M foundation model from OpenAI, trained from scratch on FineWeb-Edu 10BT dataset with some modern improvements:
+A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens with modern architecture improvements (RoPE, SwiGLU, RMSNorm, longer/deeper layout). The result surpasses the original GPT-2 124M by a wide margin and matches GPT-3 124M on HellaSwag — at a training cost of ~$15 on 2x RTX 5090.
+
+> **Latest run (200226):** `train_gpt2.py` — deeper/longer architecture (30 layers, 512 embd), 40k steps
 
 ## Modern Improvements Applied
 
@@ -15,6 +17,8 @@ This project is a near complete reproduction of the original GPT-2 124M foundati
 * **SwiGLU activation** - Replaced GELU with SwiGLU (used in LLaMA, PaLM) for improved model quality
 * **RoPE positional embeddings** - Replaced learned positional embeddings with Rotary Position Embeddings for better relative position encoding and length extrapolation
 * **RMSNorm** - Replaced LayerNorm with RMSNorm for ~40% faster normalization at equal performance
+* **Dual PatchNorm** - Post-Embedding Normalization. Add LayerNorm/RMSNorm right after (tok_embed + pos_embed)
+* **Long instead of wide architecture** - literature suggests that a deeper/longer model (more blocks) is better than a wider one (fewer blocks, larger embedding). Switching to the longer layout squeezes out more performance at almost the same parameter count (~128M vs. 124M).
 
 ### Training Regime
 * **Higher learning rate** - Increased LR up to 3x for faster convergence
@@ -24,29 +28,35 @@ This project is a near complete reproduction of the original GPT-2 124M foundati
 ## Training Configuration
 
 * **GPU:** 2x RTX 5090 (32 GB) rented on Vast.ai
-* **Training time:** ~17 hours
-* **Training cost:** ~$11 USD
+* **Training time:** ~18 hours
+* **Training cost:** ~$11-15 USD
 * **Framework**: PyTorch with DDP (DistributedDataParallel)
 * **Base implementation:** Andrej Karpathy's build-nanoGPT repo
 * **Dataset:** FineWeb-Edu 10B tokens
 * **Batch size:** 524,288 tokens per step (~0.5M)
-* **Total steps:** 19,073 x 2 steps (2 epochs)
+* **Total steps:** 40,000 steps (~2 epochs)
+* **Architecture:** 30 layers × 512 embd × 8 heads (~128M params)
 
 ## Results Achieved
 
-* **HellaSwag accuracy:** 0.32 (32%) vs. 0.294 (29.4%) original GPT-2
-* **Validation loss:** 2.99 vs. ~3.29 original GPT-2
+| Run | Val Loss | HellaSwag | vs. GPT-2 baseline |
+|-----|----------|-----------|--------------------|
+| gpt-2 (baseline) | ~3.29 | 0.294 | — |
+| gpt-improved (RoPE + SwiGLU) | ~2.99 | 0.320 | +2.6 pp |
+| **gpt-improved-v2 long (200226)** | **2.944** | **0.3354** | **+4.1 pp** |
+| OpenAI GPT-3 (124M) target | — | 0.337 | — |
 
-### Training & Validation Loss Curve
+### Training & Validation Loss + HellaSwag
 
-![Training and Validation Loss](results/050226/img/train-val_loss.png)
+![Combined Training Comparison](results/200226/combined_comparison.png)
 
-The plot shows stable training convergence over ~38k steps (2 epochs) with the model surpassing g the original GPT-2 performance despite using only 10B tokens (GPT-2 was trained on much more data) and almost matching the GPT-3 124M on the HellaSwag eval. 
+The latest run (`train_gpt2.py`, 200226) completes 40k steps over ~2 epochs, surpassing the original GPT-2 performance by a wide margin and basically matching the GPT-3 124M HellaSwag target (0.3354 vs. 0.337), despite training on only 10B tokens (original GPT-3 124M was trained on 300B tokens dataset).
 
 ## Detailed Documentation
 
 For complete training parameters, architecture details, and hyperparameters, see:
-- [`results/050226/training_params.md`](results/050226/training_params.md) - Latest training run (RoPE + SwiGLU + RMSNorm, 2 epochs)
+- [`results/200226/log.csv`](results/200226/log.csv) - Latest training run (long architecture, 40k steps)
+- [`results/050226/training_params.md`](results/050226/training_params.md) - Previous run (RoPE + SwiGLU + RMSNorm, 2 epochs)
 - [`results/230126/training_params.md`](results/230126/training_params.md) - Initial training run (baseline GPT-2 reproduction)
 - [`improvements_plan.md`](improvements_plan.md) - Completed and planned improvements
 
@@ -54,12 +64,15 @@ For complete training parameters, architecture details, and hyperparameters, see
 
 ```
 reproduce_gpt-2/
-├── train_gpt2.py           # Main training script
+├── train_gpt2.py           # Training script (long/deeper architecture)
 ├── fineweb.py              # Dataset preparation script
 ├── hellaswag.py            # HellaSwag evaluation utilities
-├── show_results.py            # Results visualisation (saves to results/)
+├── show_results.py         # Results visualisation (saves to results/)
 ├── improvements_plan.md    # Potential improvements analysis
 ├── results/
+│   ├── combined_comparison.png  # All runs compared (loss + HellaSwag)
+│   ├── 200226/
+│   │   └── log.csv              # Latest run log (long arch, 40k steps)
 │   ├── 050226/
 │   │   ├── training_params.md   # Run with RoPE, SwiGLU, RMSNorm (2 epochs)
 │   │   └── img/
@@ -88,10 +101,14 @@ reproduce_gpt-2/
    ```
 
 3. **Monitor training:**
-   - Training/validation losses logged to `log/log.txt`
+   - Training/validation losses and evals logged to `results/<date>/log.csv`
    - Model checkpoints saved every 5000 steps
    - HellaSwag evaluation every 250 steps
 
+4. **Visualise results:**
+   ```bash
+   python show_results.py
+   ```
 
 ## Acknowledgments
 
