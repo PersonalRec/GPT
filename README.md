@@ -39,12 +39,12 @@ A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens wit
 
 ## Results Achieved
 
-| Run | Val Loss | HellaSwag | vs. GPT-2 baseline |
-|-----|----------|-----------|--------------------|
-| gpt-2 (baseline) | ~3.29 | 0.294 | — |
-| gpt-improved (RoPE + SwiGLU) | ~2.99 | 0.320 | +2.6 pp |
-| **gpt-improved-v2 long (200226)** | **2.944** | **0.3354** | **+4.1 pp** |
-| OpenAI GPT-3 (124M) target | — | 0.337 | — |
+| Run | Val Loss | HellaSwag |
+|-----|----------|-----------|
+| gpt-2 (baseline) | ~3.29 | 0.294 |
+| gpt-improved (RoPE + SwiGLU) | ~2.99 | 0.320 |
+| **gpt-improved-v2 long (200226)** | **2.944** | **0.3354** |
+| OpenAI GPT-3 (124M) target | — | 0.337 |
 
 ### Training & Validation Loss + HellaSwag
 
@@ -55,7 +55,7 @@ The latest run (`train_gpt2.py`, 200226) completes 40k steps over ~2 epochs, sur
 ## Detailed Documentation
 
 For complete training parameters, architecture details, and hyperparameters, see:
-- [`results/200226/log.csv`](results/200226/log.csv) - Latest training run (long architecture, 40k steps)
+- [`results/200226/training_params.md`](results/200226/training_params.md) - Latest training run (long architecture, 40k steps)
 - [`results/050226/training_params.md`](results/050226/training_params.md) - Previous run (RoPE + SwiGLU + RMSNorm, 2 epochs)
 - [`results/230126/training_params.md`](results/230126/training_params.md) - Initial training run (baseline GPT-2 reproduction)
 - [`improvements_plan.md`](improvements_plan.md) - Completed and planned improvements
@@ -72,7 +72,8 @@ reproduce_gpt-2/
 ├── results/
 │   ├── combined_comparison.png  # All runs compared (loss + HellaSwag)
 │   ├── 200226/
-│   │   └── log.csv              # Latest run log (long arch, 40k steps)
+│   │   ├── training_params.md   # Long arch, 40k steps, 2x RTX 5090
+│   │   └── log.csv              # Full training log
 │   ├── 050226/
 │   │   ├── training_params.md   # Run with RoPE, SwiGLU, RMSNorm (2 epochs)
 │   │   └── img/
