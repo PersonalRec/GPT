@@ -1,6 +1,6 @@
 # GPT-2 124M Reproduction
 
-A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens with modern architecture improvements (RoPE, SwiGLU, RMSNorm, longer/deeper layout). The result surpasses the original GPT-2 124M by a wide margin and matches GPT-3 124M on HellaSwag — at a training cost of ~$15 on 2x RTX 5090.
+A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens with modern architecture improvements (RoPE, SwiGLU, RMSNorm, deep & narrow architecture). The result surpasses the original GPT-2 124M by a wide margin and matches GPT-3 124M on HellaSwag — at a training cost of ~$15 on 2x RTX 5090.
 
 > **Latest run (200226):** `train_gpt2.py` — deeper/longer architecture (30 layers, 512 embd), 40k steps
 
@@ -21,8 +21,8 @@ A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens wit
 * **Long instead of wide architecture** - literature suggests that a deeper/longer model (more blocks) is better than a wider one (fewer blocks, larger embedding). Switching to the longer layout squeezes out more performance at almost the same parameter count (~128M vs. 124M).
 
 ### Training Regime
-* **Higher learning rate** - Increased LR up to 3x for faster convergence
-* **Multi-epoch training** - Extended training from 1 to multiple epochs for better data utilization
+* **Higher learning rate** - Increased LR up to 4x for faster convergence
+* **Multi-epoch training** - Extended training from 1 to 2 epochs for better data utilization
 * **Data shuffling** - Documents and shards are randomly permuted each epoch to avoid repeated ordering
 
 ## Training Configuration
@@ -43,14 +43,14 @@ A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens wit
 |-----|----------|-----------|
 | gpt-2 (baseline) | ~3.29 | 0.294 |
 | gpt-improved (RoPE + SwiGLU) | ~2.99 | 0.320 |
-| **gpt-improved-v2 long (200226)** | **2.944** | **0.3354** |
+| **gpt-improved-v2 deep (200226)** | **2.944** | **0.336** |
 | OpenAI GPT-3 (124M) target | — | 0.337 |
 
 ### Training & Validation Loss + HellaSwag
 
-![Combined Training Comparison](results/200226/combined_comparison.png)
+![Combined Training Comparison](results/combined_comparison.png)
 
-The latest run (`train_gpt2.py`, 200226) completes 40k steps over ~2 epochs, surpassing the original GPT-2 performance by a wide margin and basically matching the GPT-3 124M HellaSwag target (0.3354 vs. 0.337), despite training on only 10B tokens (original GPT-3 124M was trained on 300B tokens dataset).
+The latest run (`train_gpt2.py`, 200226) completes 40k steps over ~2 epochs, surpassing the original GPT-2 performance by a wide margin and basically matching the GPT-3 124M HellaSwag target (0.336 vs. 0.337), despite training on only 10B tokens (original GPT-3 124M was trained on 300B tokens dataset).
 
 ## Detailed Documentation
 
@@ -72,7 +72,7 @@ reproduce_gpt-2/
 ├── results/
 │   ├── combined_comparison.png  # All runs compared (loss + HellaSwag)
 │   ├── 200226/
-│   │   ├── training_params.md   # Long arch, 40k steps, 2x RTX 5090
+│   │   ├── training_params.md   # Deep arch, 40k steps, 2x RTX 5090
 │   │   └── log.csv              # Full training log
 │   ├── 050226/
 │   │   ├── training_params.md   # Run with RoPE, SwiGLU, RMSNorm (2 epochs)
@@ -103,8 +103,8 @@ reproduce_gpt-2/
 
 3. **Monitor training:**
    - Training/validation losses and evals logged to `results/<date>/log.csv`
-   - Model checkpoints saved every 5000 steps
-   - HellaSwag evaluation every 250 steps
+   - Model checkpoints saved every 10,000 steps
+   - HellaSwag evaluation every 500 steps
 
 4. **Visualise results:**
    ```bash
@@ -119,6 +119,9 @@ Huge thanks to **Andrej Karpathy** for his excellent course and implementation:
 
 Special thanks to **Josh Starmer (StatQuest)** for clear explanations of ML/DL concepts:
 - **YouTube Channel:** [StatQuest with Josh Starmer](https://www.youtube.com/@statquest)
+
+Special thanks to **Stanford** for making their course materials freely available:
+- **CS336:** [Language Modeling from Scratch](https://online.stanford.edu/courses/cs336-language-modeling-scratch)
 
 
 

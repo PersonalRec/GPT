@@ -4,7 +4,7 @@ Combined Training Results Visualization
 Compares the training runs:
 - 230126: Baseline GPT-2 reproduction
 - 050226: Improved version with RoPE, SwiGLU, and RMSNorm
-- 200226: Improved version, long architecture
+- 200226: Improved version, deep & narrow architecture
 
 Saves the resulting plot to results/combined_comparison.png
 
@@ -111,7 +111,7 @@ def load_log(log_path):
 log_files = {
     "gpt-2 (baseline)": "logs/log124M_40B_230126/log.txt",
     "gpt-improved (RoPE + SwiGLU)": "logs/log124M_050226/log.txt",
-    "gpt-improved-v2 (long)": "results/200226/log.csv",
+    "gpt-improved-v2 (deep & narrow)": "results/200226/log.csv",
 }
 
 # Load and parse both log files
@@ -137,7 +137,7 @@ plt.subplot(121)
 colors = {
     "gpt-2 (baseline)": {'train': '#1f77b4', 'val': '#ff7f0e'},
     "gpt-improved (RoPE + SwiGLU)": {'train': '#2ca02c', 'val': '#d62728'},
-    "gpt-improved-v2 (long)": {'train': '#9467bd', 'val': '#e377c2'},
+    "gpt-improved-v2 (deep & narrow)": {'train': '#9467bd', 'val': '#e377c2'},
 }
 
 for run_name, streams in all_runs.items():
@@ -171,7 +171,7 @@ plt.subplot(122)
 hella_colors = {
     "gpt-2 (baseline)": '#1f77b4',
     "gpt-improved (RoPE + SwiGLU)": '#2ca02c',
-    "gpt-improved-v2 (long)": '#9467bd',
+    "gpt-improved-v2 (deep & narrow)": '#9467bd',
 }
 
 for run_name, streams in all_runs.items():
