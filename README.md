@@ -1,8 +1,24 @@
-# GPT-2 124M Reproduction
+# GPT-2/3 124M Reproduction from scratch
 
 A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens with modern architecture improvements (RoPE, SwiGLU, RMSNorm, deep & narrow architecture). The result surpasses the original GPT-2 124M by a wide margin and matches GPT-3 124M on HellaSwag — at a training cost of ~$15 on 2x RTX 5090.
 
 > **Latest run (200226):** `train_gpt2.py` — deeper/longer architecture (30 layers, 512 embd), 40k steps
+
+## Results Achieved
+
+| Run | Val Loss | HellaSwag |
+|-----|----------|-----------|
+| gpt-2 (baseline) | ~3.29 | 0.294 |
+| gpt-improved (RoPE + SwiGLU) | ~2.99 | 0.320 |
+| **gpt-improved-v2 deep (200226)** | **2.944** | **0.336** |
+| OpenAI GPT-3 (124M) target | — | 0.337 |
+
+### Training & Validation Loss + HellaSwag
+
+![Combined Training Comparison](results/combined_comparison.png)
+
+The latest run (`train_gpt2.py`, 200226) completes 40k steps over ~2 epochs, surpassing the original GPT-2 performance by a wide margin and basically matching the GPT-3 124M HellaSwag target (0.336 vs. 0.337), despite training on only 10B tokens (original GPT-3 124M was trained on 300B tokens dataset).
+
 
 ## Modern Improvements Applied
 
@@ -36,21 +52,6 @@ A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens wit
 * **Batch size:** 524,288 tokens per step (~0.5M)
 * **Total steps:** 40,000 steps (~2 epochs)
 * **Architecture:** 30 layers × 512 embd × 8 heads (~128M params)
-
-## Results Achieved
-
-| Run | Val Loss | HellaSwag |
-|-----|----------|-----------|
-| gpt-2 (baseline) | ~3.29 | 0.294 |
-| gpt-improved (RoPE + SwiGLU) | ~2.99 | 0.320 |
-| **gpt-improved-v2 deep (200226)** | **2.944** | **0.336** |
-| OpenAI GPT-3 (124M) target | — | 0.337 |
-
-### Training & Validation Loss + HellaSwag
-
-![Combined Training Comparison](results/combined_comparison.png)
-
-The latest run (`train_gpt2.py`, 200226) completes 40k steps over ~2 epochs, surpassing the original GPT-2 performance by a wide margin and basically matching the GPT-3 124M HellaSwag target (0.336 vs. 0.337), despite training on only 10B tokens (original GPT-3 124M was trained on 300B tokens dataset).
 
 ## Detailed Documentation
 
