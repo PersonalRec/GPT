@@ -1,8 +1,8 @@
-# GPT-2/3 124M Reproduction from scratch
+# GPT-2/3 128M Reproduction from scratch
 
-A from-scratch reproduction of GPT-2 124M, trained on FineWeb-Edu 10B tokens with modern architecture improvements (RoPE, SwiGLU, RMSNorm, deep & narrow architecture). The result surpasses the original GPT-2 124M by a wide margin and matches GPT-3 124M on HellaSwag — at a training cost of ~$15 on 2x RTX 5090.
+A from-scratch reproduction and optimization of GPT-2/3 128M, trained on FineWeb-Edu 10B tokens with modern architecture improvements (RoPE, SwiGLU, RMSNorm, deep & narrow architecture). The result surpasses the original GPT-2 124M by a wide margin and matches GPT-3 124M on HellaSwag — at a training cost of ~$15 on 2x RTX 5090.
 
-> **Latest run (200226):** `train_gpt2.py` — deeper/longer architecture (30 layers, 512 embd), 40k steps
+> **Latest run (200226):** `train_gpt.py` — deeper/longer architecture (30 layers, 512 embd), 40k steps
 
 ## Results Achieved
 
@@ -61,33 +61,9 @@ For complete training parameters, architecture details, and hyperparameters, see
 - [`results/230126/training_params.md`](results/230126/training_params.md) - Initial training run (baseline GPT-2 reproduction)
 - [`improvements_plan.md`](improvements_plan.md) - Completed and planned improvements
 
-## Project Structure
-
-```
-reproduce_gpt-2/
-├── train_gpt2.py           # Training script (long/deeper architecture)
-├── fineweb.py              # Dataset preparation script
-├── hellaswag.py            # HellaSwag evaluation utilities
-├── show_results.py         # Results visualisation (saves to results/)
-├── improvements_plan.md    # Potential improvements analysis
-├── results/
-│   ├── combined_comparison.png  # All runs compared (loss + HellaSwag)
-│   ├── 200226/
-│   │   ├── training_params.md   # Deep arch, 40k steps, 2x RTX 5090
-│   │   └── log.csv              # Full training log
-│   ├── 050226/
-│   │   ├── training_params.md   # Run with RoPE, SwiGLU, RMSNorm (2 epochs)
-│   │   └── img/
-│   │       └── train-val_loss.png
-│   └── 230126/
-│       ├── training_params.md   # Complete training parameters
-│       └── img/
-│           └── train-val_loss.png
-```
-
 ## Reproduction Steps
 
-0. **Set your GPU peak FLOPS** in `train_gpt2.py` for MFU calculation:
+0. **Set your GPU peak FLOPS** in `train_gpt.py` for MFU calculation:
    ```python
    gpu_peak_flops = 209.5e12  # RTX 5090 bf16
    ```
@@ -99,7 +75,7 @@ reproduce_gpt-2/
 
 2. **Train the model (multi-GPU):**
    ```bash
-   torchrun --standalone --nproc_per_node=2 train_gpt2.py
+   torchrun --standalone --nproc_per_node=2 train_gpt.py
    ```
 
 3. **Monitor training:**
