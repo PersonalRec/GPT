@@ -64,9 +64,8 @@ epochs = 5
 
 weight_decay = 0.1 
 
-eval_steps = 10       # Evaluate every N steps
-generate_steps = 10   # Generate sample text every N steps
-# checkpointer_steps is set after loader creation (= steps_per_epoch)
+eval_steps = 50       # Evaluate every N steps
+generate_steps = 100   # Generate sample text every N steps
 
 # Set the torch seed parameter
 torch.manual_seed(1337)
@@ -286,7 +285,6 @@ val_loader = SFTLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_wo
 # Each optimizer step consumes grad_accum_steps micro-batches.
 steps_per_epoch = len(train_loader) // grad_accum_steps
 max_steps = steps_per_epoch * epochs
-checkpointer_steps = steps_per_epoch  # save one checkpoint per epoch
 if master_process:
     print(f"\nTraining schedule (from dataset):")
     print(f"  train micro-batches per rank: {len(train_loader)}")
@@ -433,29 +431,33 @@ for step in range(max_steps):
         
         step_val_loss = (val_loss_sum / val_token_count).item()
 
-        # write logs and save model checkpoints
         if master_process:
             print(f"validation loss: {step_val_loss:.4f}")
             tb_writer.add_scalar("loss/val", step_val_loss, step)
-            if step > 0 and (step % checkpointer_steps == 0 or last_step):
-                # write model checkpoints (includes optimizer state for resuming post-training)
-                ckpt_out_path = os.path.join(log_dir, f"model_{step:05d}.pt")
-                ckpt_out = {
-                    'model': raw_model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'config': raw_model.config,
-                    'step': step,
-                    'val_loss': step_val_loss,
-                    'base_checkpoint': checkpoint_path,  # reference to original pre-trained model
-                    'rng_state': {
-                        'python': torch.random.get_rng_state(),
-                        'numpy': np.random.get_state(),
-                    },
-                }
-                if device_type == "cuda":
-                    ckpt_out['rng_state']['cuda'] = torch.cuda.get_rng_state(device)
-                torch.save(ckpt_out, ckpt_out_path)
-        
+
+    # Save checkpoint at every epoch boundary and on the last step
+    epoch_boundary = step > 0 and step % steps_per_epoch == 0
+    if master_process and (epoch_boundary or last_step):
+        epoch_num = step // steps_per_epoch if epoch_boundary else epochs
+        ckpt_out_path = os.path.join(log_dir, f"model_epoch{epoch_num:02d}_step{step:05d}.pt")
+        ckpt_out = {
+            'model': raw_model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'config': raw_model.config,
+            'step': step,
+            'epoch': epoch_num,
+            'val_loss': step_val_loss,
+            'base_checkpoint': checkpoint_path,
+            'rng_state': {
+                'python': torch.random.get_rng_state(),
+                'numpy': np.random.get_state(),
+            },
+        }
+        if device_type == "cuda":
+            ckpt_out['rng_state']['cuda'] = torch.cuda.get_rng_state(device)
+        torch.save(ckpt_out, ckpt_out_path)
+        print(f"  checkpoint saved: {ckpt_out_path}")
+
     # Training loop
 
     model.train()
