@@ -26,6 +26,7 @@ results/200226/Screenshot 2026-02-20 at 17.35.41.png
 finetuning/data
 finetuning/params_results.md
 finetuning/results
+finetuning/test_model.ipynb
 
 
 # Training logs and checkpoints

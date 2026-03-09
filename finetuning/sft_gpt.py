@@ -1,8 +1,9 @@
 """
-SFT post-training of the GPT 128M on the Databricks-Dolly-15K Dataset
+SFT post-training of the GPT 128M on a mixed SFT dataset
+(Dolly-15K, Alpaca-Cleaned, SmolSmoltalk, Tulu-3, Guanaco, OpenOrca-FLAN).
 
 Usage:
-    1. Download the dataset:   python prepare_dolly.py
+    1. Prepare the datasets:   python prepare_sft_data.py
     2. Single GPU:             python sft_gpt.py
     2. Multi-GPU:              torchrun --standalone --nproc_per_node=2 sft_gpt.py
     3. Tensorboard (locally):  tensorboard --logdir log/tensorboard
@@ -41,7 +42,7 @@ torch.set_float32_matmul_precision('high')
 
 # Paths (resolved relative to this script's location, so it works from any cwd)
 checkpoint_path = os.path.join(SCRIPT_DIR, "..", "results", "200226", "model_39999.pt")
-data_root = os.path.join(SCRIPT_DIR, 'data/dolly_15k')
+data_root = os.path.join(SCRIPT_DIR, 'data/sft_mix')
 
 use_compile = True # Using of torch.compile() to speed up the training process
 
@@ -58,16 +59,14 @@ warmup_steps = 40
 constant_lr = False  # if True, use a fixed max_lr throughout training (no warmup, no decay)
 
 epochs = 5
-steps_per_epoch = 8692 // (B * gradient_accum_steps)
-max_steps = steps_per_epoch * epochs
-# print(f"steps_per_epoch = {steps_per_epoch}")
-# sys.exit()
+# steps_per_epoch and max_steps are computed after the data loaders are
+# created so they reflect the actual dataset size (not a hardcoded value).
 
 weight_decay = 0.1 
 
-eval_steps = 10            # Evaluate every N steps
-checkpointer_steps = steps_per_epoch  # Save every epoch
-generate_steps = 10       # Generate sample text every N steps
+eval_steps = 10       # Evaluate every N steps
+generate_steps = 10   # Generate sample text every N steps
+# checkpointer_steps is set after loader creation (= steps_per_epoch)
 
 # Set the torch seed parameter
 torch.manual_seed(1337)
@@ -78,7 +77,7 @@ if torch.cuda.is_available():
 # Improved DataLoaderLite with proper shuffling for multi-epoch training
 
 class SFTLoaderLite:
-    def __init__(self, B, T, process_rank, num_processes, split, data_root='data/dolly_15k', seed=1337):
+    def __init__(self, B, T, process_rank, num_processes, split, data_root='data/sft_mix', seed=1337):
         self.B = B
         self.T = T
         self.process_rank = process_rank
@@ -90,7 +89,7 @@ class SFTLoaderLite:
         self.rng = np.random.default_rng(seed)
         self.base_seed = seed
         
-        # Get token/mask shard filename pairs written by prepare_dolly.py
+        # Get token/mask shard filename pairs written by prepare_sft_data.py
         token_files = sorted(
             f for f in os.listdir(data_root)
             if f.startswith(f"{split}_tokens_") and f.endswith(".npy")
@@ -281,6 +280,18 @@ train_loader = SFTLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_
                                split='train', data_root=data_root, seed=42)
 val_loader = SFTLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size,
                              split='val', data_root=data_root, seed=42)
+
+# Derive training schedule from the actual dataset size.
+# len(train_loader) = full micro-batches available for this rank.
+# Each optimizer step consumes grad_accum_steps micro-batches.
+steps_per_epoch = len(train_loader) // grad_accum_steps
+max_steps = steps_per_epoch * epochs
+checkpointer_steps = steps_per_epoch  # save one checkpoint per epoch
+if master_process:
+    print(f"\nTraining schedule (from dataset):")
+    print(f"  train micro-batches per rank: {len(train_loader)}")
+    print(f"  steps_per_epoch: {steps_per_epoch}")
+    print(f"  max_steps:       {max_steps}  ({epochs} epochs)")
 
 
 # ========================================= Load Pre-trained Checkpoint =======================================================
