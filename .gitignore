@@ -24,7 +24,8 @@ results/050226/img/Screenshot 2026-02-04 at 21.24.21.png
 results/050226/img/Screenshot 2026-02-05 at 12.18.17.png
 results/200226/Screenshot 2026-02-20 at 17.35.41.png
 finetuning/data
-
+finetuning/params_results.md
+finetuning/results
 
 
 # Training logs and checkpoints

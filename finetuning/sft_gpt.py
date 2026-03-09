@@ -46,21 +46,28 @@ data_root = os.path.join(SCRIPT_DIR, 'data/dolly_15k')
 use_compile = True # Using of torch.compile() to speed up the training process
 
 # Gradient accumulation parameters
-B = 4  # micro-batch size
+B = 8  # micro-batch size
 T = 1024 # sequence of length (context window size) for GPT-2, 2048 for GPT-3
-gradient_accum_steps = 4
+gradient_accum_steps = 16
 total_batch_size = B * T * gradient_accum_steps 
 
-max_lr = 6e-4 * 4 / 10 # # 10x lower than pre-training to avoid catastrophic forgetting
+
+max_lr = 2e-5 
 min_lr = max_lr * 0.1
-warmup_steps = 100 
-max_steps = 2866 * 2 # 2 epochs on Dolly-15K = 15k examples total. 95/5 split = 14.2k training examples. After filtering 11465. 11,465 / B=4 = 2866
+warmup_steps = 40
+constant_lr = False  # if True, use a fixed max_lr throughout training (no warmup, no decay)
 
-weight_decay = 0.05 # Lower than pre-training (0.1) — less regularization needed for fine-tuning
+epochs = 5
+steps_per_epoch = 3168 // (B * gradient_accum_steps)
+max_steps = steps_per_epoch * epochs
+# print(f"steps_per_epoch = {steps_per_epoch}")
+# sys.exit()
 
-eval_steps = 100            # Evaluate every N steps
-checkpointer_steps = max_steps // 2  # Save checkpoint every N steps
-generate_steps = 100       # Generate sample text every N steps
+weight_decay = 0.1 
+
+eval_steps = 10            # Evaluate every N steps
+checkpointer_steps = steps_per_epoch  # Save every epoch
+generate_steps = 10       # Generate sample text every N steps
 
 # Set the torch seed parameter
 torch.manual_seed(1337)
@@ -323,6 +330,8 @@ raw_model = model.module if ddp else model
 # ================================================ Learning rate Scheduler =================================================
 
 def get_lr(it):
+    if constant_lr:
+        return max_lr
     # 1) linear warmup for warmup_iters step
     if it < warmup_steps:
         return max_lr * (it+1) / warmup_steps

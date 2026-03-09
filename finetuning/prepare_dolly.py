@@ -21,7 +21,8 @@ BLOCK_SIZE = 1024
 SEQ_LEN = BLOCK_SIZE + 1
 VAL_SIZE = 0.05
 SHARD_SIZE = 2048
-MIN_RESPONSE_TOKENS = 16
+MIN_RESPONSE_TOKENS = 64
+EXCLUDED_CATEGORIES = {"summarization", "information_extraction"}
 
 enc = tiktoken.get_encoding("gpt2")
 eot = enc._special_tokens["<|endoftext|>"]
@@ -111,6 +112,17 @@ def main():
 
     print("downloading Dolly-15K from Hugging Face...")
     dataset = load_dataset("databricks/databricks-dolly-15k", split="train")
+
+    all_categories = sorted(set(dataset["category"]))
+    kept_categories = sorted(c for c in all_categories if c not in EXCLUDED_CATEGORIES)
+    print(f"\nExcluding categories: {sorted(EXCLUDED_CATEGORIES)}")
+    print(f"Categories included ({len(kept_categories)}):")
+    for cat in kept_categories:
+        count = sum(1 for c in dataset["category"] if c == cat)
+        print(f"  {cat}: {count} examples")
+    print()
+
+    dataset = dataset.filter(lambda ex: ex["category"] not in EXCLUDED_CATEGORIES)
     split_dataset = dataset.train_test_split(test_size=VAL_SIZE, seed=SEED, shuffle=True)
 
     train_stats = write_split("train", split_dataset["train"])
