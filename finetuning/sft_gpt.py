@@ -58,7 +58,7 @@ warmup_steps = 40
 constant_lr = False  # if True, use a fixed max_lr throughout training (no warmup, no decay)
 
 epochs = 5
-steps_per_epoch = 3168 // (B * gradient_accum_steps)
+steps_per_epoch = 8692 // (B * gradient_accum_steps)
 max_steps = steps_per_epoch * epochs
 # print(f"steps_per_epoch = {steps_per_epoch}")
 # sys.exit()

@@ -21,8 +21,8 @@ BLOCK_SIZE = 1024
 SEQ_LEN = BLOCK_SIZE + 1
 VAL_SIZE = 0.05
 SHARD_SIZE = 2048
-MIN_RESPONSE_TOKENS = 64
-EXCLUDED_CATEGORIES = {"summarization", "information_extraction"}
+MIN_RESPONSE_TOKENS = 32
+EXCLUDED_CATEGORIES = {}
 
 enc = tiktoken.get_encoding("gpt2")
 eot = enc._special_tokens["<|endoftext|>"]
@@ -31,15 +31,12 @@ eot = enc._special_tokens["<|endoftext|>"]
 def format_dolly_prompt(instruction, context=""):
     if context:
         return (
-            "Below is an instruction that describes a task, paired with an input that provides further context. "
-            "Write a response that appropriately completes the request.\n\n"
             f"### Instruction:\n{instruction}\n\n"
             f"### Input:\n{context}\n\n"
             "### Response:\n"
         )
 
     return (
-        "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n"
         f"### Instruction:\n{instruction}\n\n"
         "### Response:\n"
     )
