@@ -11,6 +11,10 @@ Supported datasets:
     - allenai/tulu-3-sft-personas-instruction-following
     - timdettmers/openassistant-guanaco
     - imone/OpenOrca_FLAN
+    - Open-Orca/SlimOrca          (system+human→gpt ShareGPT format, ~518K examples)
+    - openai/gsm8k                (grade school math chain-of-thought, ~7.5K train examples)
+    - lmsys/lmsys-chat-1m         (real-world LLM conversations; requires HF license agreement)
+    - garage-bAInd/Open-Platypus  (curated reasoning & instruction dataset)
 
 Usage:
     python prepare_sft_data.py                          # prepare all datasets (15K cap each)
@@ -21,25 +25,26 @@ Usage:
 
 import argparse
 import json
+import multiprocessing as mp
 import os
+
+# Skip the HF Hub network check for cached datasets to avoid 60s+ ETag timeout
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
 import re
 import time
+from functools import partial
 import numpy as np
 import tiktoken
-from huggingface_hub import login
-from datasets import load_dataset
+from tqdm import tqdm
+from datasets import load_dataset, enable_progress_bar
+enable_progress_bar()
 from langdetect import detect, LangDetectException
 from langdetect import DetectorFactory
 DetectorFactory.seed = 0   # make langdetect deterministic
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-
-# Fixing of the HuggingFace issue with slow dataset downloading 
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"  # Disable legacy fast transfer
-os.environ["HF_HUB_DISABLE_XET"] = "1"         # Disable Xet backend (v1.0+)
-os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "300"  # 5 minutes (default is 10s)
-os.environ["HF_HUB_ETAG_TIMEOUT"] = "60"       # Metadata timeout
 
 SEED = 1337
 BLOCK_SIZE = 1024
@@ -49,7 +54,11 @@ SHARD_SIZE = 2048
 MIN_RESPONSE_TOKENS = 32
 
 def load_hf_token():
-    """Load HF_TOKEN from the .env file in the project root and authenticate."""
+    """Load HF_TOKEN from the .env file in the project root and set it as an env var.
+
+    Setting HF_TOKEN in the environment is sufficient for load_dataset() to
+    authenticate — no network round-trip is needed at startup.
+    """
     env_path = os.path.join(PROJECT_ROOT, ".env")
     token = None
 
@@ -62,7 +71,7 @@ def load_hf_token():
                     token = line.split("=", 1)[1].strip().strip('"').strip("'")
                     break
 
-    # Fall back to environment variable
+    # Fall back to environment variable already set in the shell
     if not token:
         token = os.environ.get("HF_TOKEN")
 
@@ -70,17 +79,17 @@ def load_hf_token():
         print("ERROR: HF_TOKEN not found.")
         print(f"  Looked in: {env_path}")
         print(f"  Also checked: HF_TOKEN environment variable")
-        print(f"  Please add HF_TOKEN=hf_... to your .env file")
+        print(f"  Please add HF_TOKEN=hf_... to your .env file or run:")
+        print(f"    export HF_TOKEN=hf_...")
         raise SystemExit(1)
 
-    # Validate by logging in
-    try:
-        login(token=token, add_to_git_credential=False)
-        print(f"HuggingFace authentication successful (token: ...{token[-4:]})")
-    except Exception as e:
-        print(f"ERROR: HF_TOKEN is invalid: {e}")
+    if not token.startswith("hf_"):
+        print(f"ERROR: HF_TOKEN looks malformed (expected 'hf_...'): {token[:8]}...")
         raise SystemExit(1)
 
+    # Expose to child processes and huggingface_hub without a network round-trip
+    os.environ["HF_TOKEN"] = token
+    print(f"HuggingFace token loaded (token: ...{token[-4:]})")
     return token
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "data", "sft_mix")
 
@@ -178,137 +187,157 @@ def format_prompt(instruction, context=""):
     )
 
 
-# ========================= Dataset adapters ================================================
-# Each adapter yields dicts with keys: {"instruction", "context", "response", "source"}
+# ========================= Dataset converters ==============================================
+# Each _convert_X(ex) takes one raw HuggingFace example and returns a unified dict
+# {"instruction", "context", "response", "source"}, or None to skip the example.
 
-def load_dolly():
-    """databricks/databricks-dolly-15k"""
-    ds = load_dataset("databricks/databricks-dolly-15k", split="train")
-    for ex in ds:
-        yield {
-            "instruction": ex["instruction"],
-            "context": ex.get("context", ""),
-            "response": ex["response"],
-            "source": "dolly",
-        }
+def _convert_dolly(ex):
+    return {"instruction": ex["instruction"], "context": ex.get("context", ""),
+            "response": ex["response"], "source": "dolly"}
 
 
-def load_alpaca():
-    """yahma/alpaca-cleaned"""
-    ds = load_dataset("yahma/alpaca-cleaned", split="train")
-    for ex in ds:
-        yield {
-            "instruction": ex["instruction"],
-            "context": ex.get("input", ""),
-            "response": ex["output"],
-            "source": "alpaca",
-        }
+def _convert_alpaca(ex):
+    return {"instruction": ex["instruction"], "context": ex.get("input", ""),
+            "response": ex["output"], "source": "alpaca"}
 
 
-def load_smol_smoltalk():
-    """HuggingFaceTB/smol-smoltalk — extract first user→assistant turn only."""
-    ds = load_dataset("HuggingFaceTB/smol-smoltalk", split="train")
-    for ex in ds:
-        msgs = ex["messages"]
-        if len(msgs) < 2:
-            continue
-        # Find first user→assistant pair
-        user_msg, asst_msg = None, None
-        for i, m in enumerate(msgs):
-            if m["role"] == "user" and user_msg is None:
-                user_msg = m["content"]
-            elif m["role"] == "assistant" and user_msg is not None:
-                asst_msg = m["content"]
-                break
-        if user_msg and asst_msg:
-            yield {
-                "instruction": user_msg,
-                "context": "",
-                "response": asst_msg,
-                "source": "smol-smoltalk",
-            }
+def _convert_smol_smoltalk(ex):
+    msgs = ex.get("messages", [])
+    user_msg = asst_msg = None
+    for m in msgs:
+        if m["role"] == "user" and user_msg is None:
+            user_msg = m["content"]
+        elif m["role"] == "assistant" and user_msg is not None:
+            asst_msg = m["content"]
+            break
+    if not (user_msg and asst_msg):
+        return None
+    return {"instruction": user_msg, "context": "", "response": asst_msg,
+            "source": "smol-smoltalk"}
 
 
-def load_tulu3():
-    """allenai/tulu-3-sft-personas-instruction-following"""
-    ds = load_dataset("allenai/tulu-3-sft-personas-instruction-following", split="train")
-    for ex in ds:
-        msgs = ex["messages"]
-        if len(msgs) < 2:
-            continue
-        user_msg = msgs[0].get("content", "") if msgs[0]["role"] == "user" else ""
-        asst_msg = msgs[1].get("content", "") if msgs[1]["role"] == "assistant" else ""
-        if user_msg and asst_msg:
-            yield {
-                "instruction": user_msg,
-                "context": "",
-                "response": asst_msg,
-                "source": "tulu3",
-            }
+def _convert_tulu3(ex):
+    msgs = ex.get("messages", [])
+    if len(msgs) < 2:
+        return None
+    user_msg = msgs[0].get("content", "") if msgs[0]["role"] == "user" else ""
+    asst_msg = msgs[1].get("content", "") if msgs[1]["role"] == "assistant" else ""
+    if not (user_msg and asst_msg):
+        return None
+    return {"instruction": user_msg, "context": "", "response": asst_msg, "source": "tulu3"}
 
 
-def load_guanaco():
-    """timdettmers/openassistant-guanaco — extract first Human→Assistant turn."""
-    ds = load_dataset("timdettmers/openassistant-guanaco", split="train")
-    for ex in ds:
-        text = ex["text"]
-        # Split on ### Human: and ### Assistant: markers
-        # Extract only the first turn
-        human_match = re.search(r"### Human:\s*(.*?)### Assistant:\s*", text, re.DOTALL)
-        if not human_match:
-            continue
-        instruction = human_match.group(1).strip()
-
-        # Get the first assistant response (up to next ### Human: or end)
-        after_first_asst = text[human_match.end():]
-        next_human = after_first_asst.find("### Human:")
-        if next_human != -1:
-            response = after_first_asst[:next_human].strip()
-        else:
-            response = after_first_asst.strip()
-
-        if instruction and response:
-            yield {
-                "instruction": instruction,
-                "context": "",
-                "response": response,
-                "source": "guanaco",
-            }
+def _convert_guanaco(ex):
+    text = ex["text"]
+    human_match = re.search(r"### Human:\s*(.*?)### Assistant:\s*", text, re.DOTALL)
+    if not human_match:
+        return None
+    instruction = human_match.group(1).strip()
+    after_first_asst = text[human_match.end():]
+    next_human = after_first_asst.find("### Human:")
+    response = (after_first_asst[:next_human].strip() if next_human != -1
+                else after_first_asst.strip())
+    if not (instruction and response):
+        return None
+    return {"instruction": instruction, "context": "", "response": response,
+            "source": "guanaco"}
 
 
-def load_openorca_flan():
-    """imone/OpenOrca_FLAN — large dataset, subsample recommended.
-    Prepends system prompt to instruction if present."""
-    ds = load_dataset("imone/OpenOrca_FLAN", split="train")
-    for ex in ds:
-        instruction = ex["instruction"].strip()
-        system = ex.get("system", "").strip()
-        response = ex["response"].strip()
+def _convert_openorca(ex):
+    instruction = ex["instruction"].strip()
+    system = ex.get("system", "").strip()
+    response = ex["response"].strip()
+    full_instruction = f"{system}\n\n{instruction}" if system and len(system) > 10 else instruction
+    if not (full_instruction and response):
+        return None
+    return {"instruction": full_instruction, "context": "", "response": response,
+            "source": "openorca"}
 
-        # Prepend system prompt as context if it exists and is non-trivial
-        if system and len(system) > 10:
-            full_instruction = f"{system}\n\n{instruction}"
-        else:
-            full_instruction = instruction
 
-        if full_instruction and response:
-            yield {
-                "instruction": full_instruction,
-                "context": "",
-                "response": response,
-                "source": "openorca",
-            }
+def _convert_slimorca(ex):
+    convs = ex.get("conversations", [])
+    system_msg = human_msg = gpt_msg = ""
+    for turn in convs:
+        role = turn.get("from", "")
+        value = (turn.get("value") or "").strip()
+        if role == "system" and not system_msg:
+            system_msg = value
+        elif role == "human" and not human_msg:
+            human_msg = value
+        elif role == "gpt" and human_msg and not gpt_msg:
+            gpt_msg = value
+            break
+    if not (human_msg and gpt_msg):
+        return None
+    full_instruction = (f"{system_msg}\n\n{human_msg}" if system_msg and len(system_msg) > 10
+                        else human_msg)
+    return {"instruction": full_instruction, "context": "", "response": gpt_msg,
+            "source": "slimorca"}
+
+
+def _convert_gsm8k(ex):
+    question = (ex.get("question") or "").strip()
+    answer = (ex.get("answer") or "").strip()
+    if not (question and answer):
+        return None
+    return {"instruction": question, "context": "", "response": answer, "source": "gsm8k"}
+
+
+def _convert_lmsys_chat(ex):
+    convs = ex.get("conversation", [])
+    human_msg = asst_msg = ""
+    for turn in convs:
+        role = turn.get("role", "")
+        content = (turn.get("content") or "").strip()
+        if role == "user" and not human_msg:
+            human_msg = content
+        elif role == "assistant" and human_msg and not asst_msg:
+            asst_msg = content
+            break
+    if not (human_msg and asst_msg):
+        return None
+    return {"instruction": human_msg, "context": "", "response": asst_msg,
+            "source": "lmsys-chat"}
+
+
+def _convert_open_platypus(ex):
+    instruction = (ex.get("instruction") or "").strip()
+    response = (ex.get("output") or "").strip()
+    context = (ex.get("input") or "").strip()
+    if not (instruction and response):
+        return None
+    return {"instruction": instruction, "context": context, "response": response,
+            "source": "open-platypus"}
 
 
 # ========================= Registry ========================================================
+# Maps dataset name -> (raw_loader_fn, converter_fn)
+# raw_loader_fn() calls load_dataset() and returns the HF Dataset (triggers download with
+# HF's own progress bars). converter_fn(raw_ex) converts one example or returns None to skip.
 
 DATASET_REGISTRY = {
-    "dolly": load_dolly,
-    "alpaca": load_alpaca,
-    "smol-smoltalk": load_smol_smoltalk,
-    "tulu3": load_tulu3,
-    "guanaco": load_guanaco,
-    "openorca": load_openorca_flan,
+    "dolly":         (lambda: load_dataset("databricks/databricks-dolly-15k", split="train"),
+                      _convert_dolly),
+    "alpaca":        (lambda: load_dataset("yahma/alpaca-cleaned", split="train"),
+                      _convert_alpaca),
+    "smol-smoltalk": (lambda: load_dataset("HuggingFaceTB/smol-smoltalk", split="train"),
+                      _convert_smol_smoltalk),
+    "tulu3":         (lambda: load_dataset("allenai/tulu-3-sft-personas-instruction-following",
+                                           split="train"), _convert_tulu3),
+    "guanaco":       (lambda: load_dataset("timdettmers/openassistant-guanaco", split="train"),
+                      _convert_guanaco),
+    "openorca":      (lambda: load_dataset("imone/OpenOrca_FLAN", split="train"),
+                      _convert_openorca),
+    "slimorca":      (lambda: load_dataset("Open-Orca/SlimOrca", split="train"),
+                      _convert_slimorca),
+    "gsm8k":         (lambda: load_dataset("openai/gsm8k", "main", split="train"),
+                      _convert_gsm8k),
+    "lmsys-chat":    (lambda: load_dataset("lmsys/lmsys-chat-1m", split="train").filter(
+                          lambda x: x["language"] == "English",
+                          num_proc=max(1, os.cpu_count() - 1),
+                      ), _convert_lmsys_chat),
+    "open-platypus": (lambda: load_dataset("garage-bAInd/Open-Platypus", split="train"),
+                      _convert_open_platypus),
 }
 
 
@@ -319,8 +348,8 @@ def encode_example(example):
     prompt = format_prompt(example["instruction"], example["context"])
     response = example["response"].strip()
 
-    prompt_tokens = enc.encode(prompt)
-    response_tokens = enc.encode(response)
+    prompt_tokens = enc.encode(prompt, disallowed_special=())
+    response_tokens = enc.encode(response, disallowed_special=())
     full_tokens = prompt_tokens + response_tokens + [eot]
 
     # Skip if total length exceeds our context window
@@ -377,6 +406,32 @@ def write_split(split_name, examples, output_dir):
     return shard_idx + (1 if tokens_buf else 0), total
 
 
+# ========================= Parallel worker =================================================
+
+def _worker_init():
+    """Called once per worker process — makes langdetect deterministic in every process."""
+    DetectorFactory.seed = 0
+
+
+def _process_one(raw_ex, *, converter):
+    """
+    Multiprocessing worker: convert → language-filter → encode one raw HF example.
+    Returns (tokens, mask, source) on success, or (None, reason_str) when skipped.
+    Must be a top-level function so it can be pickled by mp.Pool (spawn method on macOS).
+    """
+    example = converter(raw_ex)
+    if example is None:
+        return None, "fmt"
+    text = example["instruction"] + " " + example["response"]
+    if not is_likely_english(text):
+        return None, "lang"
+    encoded = encode_example(example)
+    if encoded is None:
+        return None, "len"
+    tokens, mask = encoded
+    return (tokens, mask, example["source"]), None
+
+
 # ========================= Main ============================================================
 
 def main():
@@ -387,6 +442,8 @@ def main():
     parser.add_argument("--max-per-dataset", type=int, default=15000,
                         help="Max examples to keep per dataset (after filtering). Set to 0 for unlimited.")
     parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR)
+    parser.add_argument("--nprocs", type=int, default=max(8, os.cpu_count() - 1),
+                        help="Number of worker processes for parallel encoding (default: all cores - 1)")
     args = parser.parse_args()
 
     # Authenticate with HuggingFace before downloading anything
@@ -404,30 +461,50 @@ def main():
         print(f"\n{'='*60}")
         print(f"Loading: {ds_name}")
         print(f"{'='*60}")
-        loader = DATASET_REGISTRY[ds_name]
-
-        kept, skipped_lang, skipped_len, skipped_short = 0, 0, 0, 0
+        kept, skipped_lang, skipped_len, skipped_fmt = 0, 0, 0, 0
         ds_encoded = []
         t_ds_start = time.perf_counter()
 
-        for example in loader():
-            # Filter non-English
-            text_to_check = example["instruction"] + " " + example["response"]
-            if not is_likely_english(text_to_check):
-                skipped_lang += 1
-                continue
+        raw_loader, converter = DATASET_REGISTRY[ds_name]
 
-            encoded = encode_example(example)
-            if encoded is None:
-                skipped_len += 1
-                continue
+        print(f"  Downloading {ds_name} ...")
+        ds = raw_loader()          # HF shows its own download progress bar here
+        total_raw = len(ds)
+        print(f"  {total_raw:,} raw examples — processing ...")
 
-            ds_encoded.append((*encoded, ds_name))
-            kept += 1
+        cap = args.max_per_dataset or None
+        worker_fn = partial(_process_one, converter=converter)
 
-            # Cap per dataset if requested
-            if args.max_per_dataset and kept >= args.max_per_dataset:
-                break
+        with mp.Pool(args.nprocs, initializer=_worker_init) as pool:
+            pbar = tqdm(
+                pool.imap(worker_fn, ds, chunksize=32),
+                total=total_raw,
+                desc=f"  {ds_name:<20}",
+                unit=" ex",
+                dynamic_ncols=True,
+            )
+            for result, skip_reason in pbar:
+                if result is None:
+                    if skip_reason == "fmt":
+                        skipped_fmt += 1
+                    elif skip_reason == "lang":
+                        skipped_lang += 1
+                    else:
+                        skipped_len += 1
+                else:
+                    ds_encoded.append(result)
+                    kept += 1
+
+                if (kept + skipped_lang + skipped_len + skipped_fmt) % 200 == 0:
+                    pbar.set_postfix(kept=kept, skip_lang=skipped_lang,
+                                     skip_len=skipped_len, refresh=False)
+
+                if cap and kept >= cap:
+                    pool.terminate()
+                    break
+
+            pbar.set_postfix(kept=kept, skip_lang=skipped_lang, skip_len=skipped_len)
+            pbar.close()
 
         ds_elapsed = time.perf_counter() - t_ds_start
         stats[ds_name] = {
@@ -436,7 +513,8 @@ def main():
             "skipped_too_long_or_short": skipped_len,
             "elapsed_s": round(ds_elapsed, 1),
         }
-        print(f"  kept: {kept} | skipped (lang): {skipped_lang} | skipped (length): {skipped_len} | time: {ds_elapsed:.1f}s")
+        print(f"  done: kept={kept:,}  skip_lang={skipped_lang:,}  "
+              f"skip_len={skipped_len:,}  skip_fmt={skipped_fmt:,}  time={ds_elapsed:.1f}s")
         all_encoded.extend(ds_encoded)
 
     print(f"\n{'='*60}")

@@ -9,9 +9,10 @@ tokenizer, and produces:
   data/sft_mix/analysis_preview.txt – human-readable text preview
 
 Usage:
-    python analyze_sft_data.py                # analyse all train + val shards
-    python analyze_sft_data.py --max 500      # only first N examples per split
-    python analyze_sft_data.py --split val    # only val split
+    python analyze_sft_data.py                    # analyse all train + val shards
+    python analyze_sft_data.py --max 500          # only first N examples per split
+    python analyze_sft_data.py --split val        # only val split
+    python analyze_sft_data.py --examples-per-ds 5  # 5 random examples per dataset
 """
 
 import argparse
@@ -143,27 +144,21 @@ def build_dataframe(split: str, max_examples: int | None) -> pd.DataFrame:
 
 # ---------------------------------------------------------------------------
 
-def sample_one_per_dataset(df: pd.DataFrame, n_extra: int, rng: np.random.Generator) -> pd.DataFrame:
-    """Return one random row per unique source, then pad with random rows up to n_extra total."""
+def sample_n_per_dataset(df: pd.DataFrame, n: int, rng: np.random.Generator) -> pd.DataFrame:
+    """Return n random rows per unique source dataset (fewer if a source has < n rows)."""
     if df.empty:
         return df
-    sources = df["source"].unique()
     picked_idx: list[int] = []
-    for src in sorted(sources):
+    for src in sorted(df["source"].unique()):
         rows = df[df["source"] == src]
-        picked_idx.append(int(rng.choice(rows.index)))
-    # Fill remaining slots with random rows not already picked
-    remaining = df.drop(index=picked_idx)
-    extra_needed = max(0, n_extra - len(picked_idx))
-    if extra_needed and not remaining.empty:
-        extra = remaining.sample(n=min(extra_needed, len(remaining)),
-                                 random_state=42)
-        picked_idx.extend(extra.index.tolist())
+        k = min(n, len(rows))
+        chosen = rng.choice(rows.index, size=k, replace=False)
+        picked_idx.extend(chosen.tolist())
     return df.loc[picked_idx].reset_index(drop=True)
 
 
 def write_txt_preview(df_train: pd.DataFrame, df_val: pd.DataFrame,
-                      n: int, out_path: Path):
+                      n_per_ds: int, out_path: Path):
     sep  = "=" * 80
     sep2 = "-" * 80
     rng  = np.random.default_rng(42)
@@ -213,15 +208,23 @@ def write_txt_preview(df_train: pd.DataFrame, df_val: pd.DataFrame,
                     f.write(f"    {src:<22} {cnt:>6,}\n")
                 f.write("\n")
 
-        # ---- sample examples (one per dataset + extras) ----
+        # ---- sample examples (n_per_ds per dataset, grouped by source) ----
         for label, df in [("TRAIN", df_train), ("VAL", df_val)]:
             if df.empty:
                 continue
-            sample = sample_one_per_dataset(df, n_extra=n, rng=rng)
-            f.write(f"{sep}\n  {label} — {len(sample)} EXAMPLES (one per source dataset)\n{sep}\n\n")
+            sample = sample_n_per_dataset(df, n=n_per_ds, rng=rng)
+            n_sources = df["source"].nunique()
+            f.write(f"{sep}\n  {label} — {len(sample)} EXAMPLES "
+                    f"({n_per_ds} random per source, {n_sources} datasets)\n{sep}\n\n")
+            current_src = None
             for _, row in sample.iterrows():
-                source_tag = f"[{row.get('source', 'unknown')}]"
-                f.write(f"{source_tag}  #{row['index']}  "
+                src = row.get("source", "unknown")
+                if src != current_src:
+                    current_src = src
+                    f.write(f"\n{'#' * 80}\n")
+                    f.write(f"  DATASET: {src}\n")
+                    f.write(f"{'#' * 80}\n\n")
+                f.write(f"[{src}]  #{row['index']}  "
                         f"total={row['total_tokens']} tok  "
                         f"(prompt={row['prompt_tokens']} | response={row['response_tokens']})\n")
                 f.write(f"{sep2}\n")
@@ -239,8 +242,8 @@ def main():
     parser.add_argument("--max",    type=int, default=None,
                         help="Max examples to load per split (default: all)")
     parser.add_argument("--split",  choices=["train", "val", "both"], default="both")
-    parser.add_argument("--preview-n", type=int, default=10,
-                        help="Number of examples to include in the .txt preview (default: 10)")
+    parser.add_argument("--examples-per-ds", type=int, default=3,
+                        help="Random examples to show per source dataset in the .txt preview (default: 3)")
     args = parser.parse_args()
 
     load_train = args.split in ("train", "both")
@@ -264,8 +267,8 @@ def main():
         print(f"  → {len(df_val):,} examples  saved to {out}")
 
     txt_out = DATA_DIR / "analysis_preview.txt"
-    print(f"Writing text preview ({args.preview_n} examples/split) → {txt_out}")
-    write_txt_preview(df_train, df_val, args.preview_n, txt_out)
+    print(f"Writing text preview ({args.examples_per_ds} examples/dataset) → {txt_out}")
+    write_txt_preview(df_train, df_val, args.examples_per_ds, txt_out)
 
     print("\nDone.")
     if load_train and not df_train.empty:

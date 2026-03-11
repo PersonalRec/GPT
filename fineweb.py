@@ -22,15 +22,14 @@ os.environ["HF_HUB_ETAG_TIMEOUT"] = "60"       # Metadata timeout
 import multiprocessing as mp
 import numpy as np
 import tiktoken
-from datasets import load_dataset # pip install datasets
-from tqdm import tqdm # pip install tqdm
+from datasets import load_dataset
+from tqdm import tqdm
 
-# Try to load .env file if it exists (for local development)
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # dotenv not installed, will use system env vars
+    pass
 
 # ------------------------------------------
 parser = argparse.ArgumentParser()

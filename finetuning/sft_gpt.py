@@ -55,10 +55,10 @@ total_batch_size = B * T * gradient_accum_steps
 
 max_lr = 2e-5 
 min_lr = max_lr * 0.1
-warmup_steps = 40
+warmup_steps = 200
 constant_lr = False  # if True, use a fixed max_lr throughout training (no warmup, no decay)
 
-epochs = 5
+epochs = 7
 # steps_per_epoch and max_steps are computed after the data loaders are
 # created so they reflect the actual dataset size (not a hardcoded value).
 
